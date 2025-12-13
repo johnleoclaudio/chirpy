@@ -7,3 +7,6 @@ build_then_run:
 clean:
 	rm -rf ./bin/out
 
+run:
+	go run main.go
+
