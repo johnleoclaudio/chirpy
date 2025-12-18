@@ -1,10 +1,9 @@
 package main
 
 import (
+	"chirpy/handlers"
 	"chirpy/internal/database"
-	"chirpy/utils"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,23 +14,23 @@ import (
 	_ "github.com/lib/pq"
 )
 
-type apiConfig struct {
+type APIConfig struct {
 	FileserverHits atomic.Int32
 }
 
-func (c *apiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
+func (c *APIConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.FileserverHits.Add(1)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (c *apiConfig) GetMetrics() string {
+func (c *APIConfig) GetMetrics() string {
 	hits := c.FileserverHits.Load()
 	return fmt.Sprintf("%v", hits)
 }
 
-func (c *apiConfig) ResetMetrics() bool {
+func (c *APIConfig) ResetMetrics() bool {
 	hits := c.FileserverHits.Load()
 	success := c.FileserverHits.CompareAndSwap(hits, 0)
 	return success
@@ -44,108 +43,28 @@ func updateHeader(next http.Handler) http.Handler {
 	})
 }
 func main() {
-	godotenv.Load()
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	dbURL := os.Getenv("DB_URL")
-	log.Println("DB_URL: ", dbURL)
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	dbQueries := database.New(db)
 
 	mux := http.ServeMux{}
 
-	// readiness endpoint
-	// returns 200 OK if the server is ready to accept requests
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("OK"))
-		if err != nil {
-			log.Fatal(err)
-		}
-	})
+	apiHandlers := handlers.NewAPIHandler(dbQueries)
 
-	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		type chirp struct {
-			Body string `json:"body"`
-		}
-		defer r.Body.Close()
+	mux.HandleFunc("GET /api/healthz", apiHandlers.HealthCheck)
+	mux.HandleFunc("POST /api/validate_chirp", apiHandlers.ValidateChirp)
+	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 
-		type errorResp struct {
-			Error string `json:"error"`
-		}
-
-		type successResp struct {
-			CleanedBody string `json:"cleaned_body"`
-		}
-
-		var chirpStr chirp
-		decode := json.NewDecoder(r.Body)
-		err := decode.Decode(&chirpStr)
-		if err != nil {
-			log.Println(err)
-			w.WriteHeader(http.StatusInternalServerError)
-			errBody := &errorResp{Error: "Something went wrong"}
-			data, err := json.Marshal(errBody)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-			w.Write([]byte(data))
-			return
-		}
-
-		if len(chirpStr.Body) > 140 {
-			w.WriteHeader(http.StatusBadRequest)
-			errBody := &errorResp{Error: "Chirp is too long"}
-			data, err := json.Marshal(errBody)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			w.Write([]byte(data))
-			return
-		}
-		data, err := json.Marshal(&successResp{CleanedBody: utils.ProfaneFilter(chirpStr.Body)})
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(data))
-	})
-
-	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		type user struct {
-			Email string `json:"email"`
-		}
-
-		var userBody user
-		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&userBody)
-		if err != nil {
-			log.Println("failed to decode data", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		createdUser, err := dbQueries.CreateUser(r.Context(), userBody.Email)
-		if err != nil {
-			log.Println("failed to create user", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		jsonData, _ := json.Marshal(createdUser)
-
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(jsonData))
-	})
-
-	apiCfg := &apiConfig{}
+	apiCfg := &APIConfig{}
 	mux.Handle("/app/", apiCfg.MiddlewareMetricsInc(updateHeader(http.StripPrefix("/app", http.FileServer(http.Dir("./app"))))))
 
 	fs := http.FileServer(http.Dir("./app/assets/"))
