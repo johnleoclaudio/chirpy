@@ -4,7 +4,7 @@ import (
 	"chirpy/handlers"
 	"chirpy/internal/database"
 	"chirpy/metrics"
-	"chirpy/middleware"
+	"chirpy/middlewares"
 	"database/sql"
 	"fmt"
 	"log"
@@ -61,12 +61,12 @@ func main() {
 
 	mux := http.ServeMux{}
 
-	apiMiddlewares := middleware.NewMiddlwares(apiMetrics)
+	apiMiddlewares := middlewares.NewMiddlwares(apiMetrics)
 	apiHandlers := handlers.NewAPIHandler(dbQueries)
 	adminHandlers := handlers.NewAdminHandlers(os.Getenv("PLATFORM"), apiMetrics, dbQueries)
 
 	mux.HandleFunc("GET /api/healthz", apiHandlers.HealthCheck)
-	mux.HandleFunc("POST /api/validate_chirp", apiHandlers.ValidateChirp)
+	mux.HandleFunc("POST /api/chirps", apiHandlers.CreateChirp)
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 
 	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(updateHeader(http.StripPrefix("/app", http.FileServer(http.Dir("./app"))))))

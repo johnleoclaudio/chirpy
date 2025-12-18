@@ -10,3 +10,12 @@ clean:
 run:
 	go run main.go
 
+## DB
+sql_generate:
+	sqlc generate
+
+db_migrate_up:
+	goose -dir ./sql/schema/ postgres "host=localhost port=5432 user=leo dbname=chirpy sslmode=disable" up
+
+db_migrate_down:
+	goose -dir ./sql/schema/ postgres "host=localhost port=5432 user=leo dbname=chirpy sslmode=disable" down

@@ -6,7 +6,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/google/uuid"
 )
+
+type Chirp struct {
+	Body   string `json:"body"`
+	UserID string `json:"user_id,omitempty"`
+}
+
+type successResp struct {
+	CleanedBody string `json:"cleaned_body"`
+}
 
 type APIHandlerStruct struct {
 	DBQueries *database.Queries
@@ -55,36 +66,37 @@ func (a *APIHandlerStruct) CreateUser(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(jsonData))
 }
 
-func (a *APIHandlerStruct) ValidateChirp(w http.ResponseWriter, r *http.Request) {
+func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	type chirp struct {
-		Body string `json:"body"`
-	}
-
-	type errorResp struct {
-		Error string `json:"error"`
-	}
-
-	type successResp struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	var chirpStr chirp
+	var chirpStr Chirp
 	decode := json.NewDecoder(r.Body)
 	err := decode.Decode(&chirpStr)
 	if err != nil {
 		log.Printf("failed to decode data: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		utils.RespondError(w, http.StatusInternalServerError, &errorResp{Error: "Something went wrong"})
+		utils.RespondError(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 
 	if len(chirpStr.Body) > 140 {
 		w.WriteHeader(http.StatusBadRequest)
-		utils.RespondError(w, http.StatusInternalServerError, &errorResp{Error: "Chirp is too long"})
+		utils.RespondError(w, http.StatusInternalServerError, "Chirp is too long")
 		return
 	}
 
-	utils.RespondJSON(w, http.StatusOK, &successResp{CleanedBody: utils.ProfaneFilter(chirpStr.Body)})
+	params := database.CreateChirpParams{
+		Body:   chirpStr.Body,
+		UserID: uuid.MustParse(chirpStr.UserID),
+	}
+	chirp, err := a.DBQueries.CreateChirp(r.Context(), params)
+	if err != nil {
+		log.Printf("failed to create chrip: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		utils.RespondError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	utils.RespondJSON(w, http.StatusOK, chirp)
 }

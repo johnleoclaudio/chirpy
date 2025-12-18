@@ -16,6 +16,10 @@ func RespondJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
-func RespondError(w http.ResponseWriter, status int, data interface{}) {
-	RespondJSON(w, status, data)
+func RespondError(w http.ResponseWriter, status int, data string) {
+	RespondJSON(w, status, &struct {
+		Error string `json:"error"`
+	}{
+		Error: data,
+	})
 }
