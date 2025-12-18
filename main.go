@@ -3,6 +3,8 @@ package main
 import (
 	"chirpy/handlers"
 	"chirpy/internal/database"
+	"chirpy/metrics"
+	"chirpy/middleware"
 	"database/sql"
 	"fmt"
 	"log"
@@ -55,60 +57,25 @@ func main() {
 	}
 
 	dbQueries := database.New(db)
+	apiMetrics := metrics.NewAPIMetrics()
 
 	mux := http.ServeMux{}
 
+	apiMiddlewares := middleware.NewMiddlwares(apiMetrics)
 	apiHandlers := handlers.NewAPIHandler(dbQueries)
+	adminHandlers := handlers.NewAdminHandlers(os.Getenv("PLATFORM"), apiMetrics, dbQueries)
 
 	mux.HandleFunc("GET /api/healthz", apiHandlers.HealthCheck)
 	mux.HandleFunc("POST /api/validate_chirp", apiHandlers.ValidateChirp)
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 
-	apiCfg := &APIConfig{}
-	mux.Handle("/app/", apiCfg.MiddlewareMetricsInc(updateHeader(http.StripPrefix("/app", http.FileServer(http.Dir("./app"))))))
+	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(updateHeader(http.StripPrefix("/app", http.FileServer(http.Dir("./app"))))))
 
 	fs := http.FileServer(http.Dir("./app/assets/"))
 	mux.Handle("/app/assets", http.StripPrefix("/app/assets", fs))
 
-	// get metrics
-	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-		hits := apiCfg.GetMetrics()
-		_, err := w.Write([]byte(fmt.Sprintf(
-			`
-        <html>
-          <body>
-            <h1>Welcome, Chirpy Admin</h1>
-            <p>Chirpy has been visited %s times!</p>
-          </body>
-        </html>
-      `, hits,
-		)))
-		if err != nil {
-			log.Fatal(err)
-		}
-	})
-
-	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, r *http.Request) {
-		if os.Getenv("PLATFORM") != "dev" {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-
-		err := dbQueries.DeleteUsers(r.Context())
-		if err != nil {
-			log.Println(err)
-		}
-
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_ = apiCfg.ResetMetrics()
-		_, err = w.Write([]byte("OK"))
-		if err != nil {
-			log.Fatal(err)
-		}
-	})
+	mux.HandleFunc("GET /admin/metrics", adminHandlers.GetMetrics)
+	mux.HandleFunc("POST /admin/reset", adminHandlers.Reset)
 
 	srv := &http.Server{Addr: ":8080", Handler: &mux}
 
