@@ -100,3 +100,16 @@ func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	utils.RespondJSON(w, http.StatusOK, chirp)
 }
+
+func (a *APIHandlerStruct) ListChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := a.DBQueries.ListChirps(r.Context())
+	if err != nil {
+		log.Printf("failed to list chrip: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		utils.RespondError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	utils.RespondJSON(w, http.StatusOK, chirps)
+}

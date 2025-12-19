@@ -66,6 +66,7 @@ func main() {
 	adminHandlers := handlers.NewAdminHandlers(os.Getenv("PLATFORM"), apiMetrics, dbQueries)
 
 	mux.HandleFunc("GET /api/healthz", apiHandlers.HealthCheck)
+	mux.HandleFunc("GET /api/chirps", apiHandlers.ListChirps)
 	mux.HandleFunc("POST /api/chirps", apiHandlers.CreateChirp)
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 
