@@ -4,9 +4,11 @@ import (
 	"chirpy/internal/database"
 	"chirpy/utils"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
+	"database/sql"
 	"github.com/google/uuid"
 )
 
@@ -112,4 +114,26 @@ func (a *APIHandlerStruct) ListChirps(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	utils.RespondJSON(w, http.StatusOK, chirps)
+}
+
+func (a *APIHandlerStruct) GetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+	u, err := uuid.Parse(chirpID)
+	if err != nil {
+		log.Fatalf("failed to parse UUID: %v", err)
+	}
+	chirp, err := a.DBQueries.GetChirp(r.Context(), u)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		log.Printf("failed to get chrip: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		utils.RespondError(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	utils.RespondJSON(w, http.StatusOK, chirp)
 }
