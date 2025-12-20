@@ -17,6 +17,7 @@ func NewMiddlwares(apiMetrics *metrics.API) *Middlewares {
 
 func (m *Middlewares) MiddlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
 		m.APIMetrics.IncMetric()
 		next.ServeHTTP(w, r)
 	})

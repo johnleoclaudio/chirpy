@@ -6,44 +6,14 @@ import (
 	"chirpy/metrics"
 	"chirpy/middlewares"
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
-type APIConfig struct {
-	FileserverHits atomic.Int32
-}
-
-func (c *APIConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c.FileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (c *APIConfig) GetMetrics() string {
-	hits := c.FileserverHits.Load()
-	return fmt.Sprintf("%v", hits)
-}
-
-func (c *APIConfig) ResetMetrics() bool {
-	hits := c.FileserverHits.Load()
-	success := c.FileserverHits.CompareAndSwap(hits, 0)
-	return success
-}
-
-func updateHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		next.ServeHTTP(w, r)
-	})
-}
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -71,7 +41,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiHandlers.CreateChirp)
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 
-	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(updateHeader(http.StripPrefix("/app", http.FileServer(http.Dir("./app"))))))
+	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("./app")))))
 
 	fs := http.FileServer(http.Dir("./app/assets/"))
 	mux.Handle("/app/assets", http.StripPrefix("/app/assets", fs))
