@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"chirpy/internal/auth"
 	"chirpy/internal/database"
 	"chirpy/utils"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 
 	"database/sql"
+
 	"github.com/google/uuid"
 )
 
@@ -17,8 +19,9 @@ type Chirp struct {
 	UserID string `json:"user_id,omitempty"`
 }
 
-type successResp struct {
-	CleanedBody string `json:"cleaned_body"`
+type User struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type APIHandlerStruct struct {
@@ -42,20 +45,29 @@ func (a *APIHandlerStruct) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 func (a *APIHandlerStruct) CreateUser(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	type user struct {
-		Email string `json:"email"`
-	}
 
-	var userBody user
+	var user User
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&userBody)
+	err := decoder.Decode(&user)
 	if err != nil {
 		log.Println("failed to decode data", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	createdUser, err := a.DBQueries.CreateUser(r.Context(), userBody.Email)
+	hashedPassword, err := auth.HashPassword(user.Password)
+	if err != nil {
+		log.Printf("failed to hash user password: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	createUserParam := &database.CreateUserParams{
+		Email:          user.Email,
+		HashedPassword: hashedPassword,
+	}
+
+	createdUser, err := a.DBQueries.CreateUser(r.Context(), *createUserParam)
 	if err != nil {
 		log.Println("failed to create user", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -66,6 +78,46 @@ func (a *APIHandlerStruct) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(jsonData))
+}
+
+func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var user User
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&user)
+	if err != nil {
+		log.Println("failed to decode data", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	retrievedUser, err := a.DBQueries.GetUser(r.Context(), user.Email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		log.Println("failed to get user", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	authenticated, err := auth.CheckPassword(user.Password, retrievedUser.HashedPassword)
+	if err != nil {
+		log.Println("failed to check password", user.Password, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if !authenticated {
+		utils.RespondError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	retrievedUser.HashedPassword = ""
+	utils.RespondJSON(w, http.StatusOK, retrievedUser)
 }
 
 func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
