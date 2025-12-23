@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"chirpy/internal/auth"
+	"chirpy/internal/config"
 	"chirpy/internal/database"
 	"chirpy/utils"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"database/sql"
 
@@ -15,8 +17,7 @@ import (
 )
 
 type Chirp struct {
-	Body   string `json:"body"`
-	UserID string `json:"user_id,omitempty"`
+	Body string `json:"body"`
 }
 
 type User struct {
@@ -24,12 +25,25 @@ type User struct {
 	Password string `json:"password"`
 }
 
+type LoginParams struct {
+	Password         string `json:"password"`
+	Email            string `json:"email"`
+	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+}
+
+type LoginResponse struct {
+	database.User
+	Token string `json:"token"`
+}
+
 type APIHandlerStruct struct {
+	APIConfig *config.APIConfig
 	DBQueries *database.Queries
 }
 
-func NewAPIHandler(dbQueries *database.Queries) *APIHandlerStruct {
+func NewAPIHandler(apiConfig *config.APIConfig, dbQueries *database.Queries) *APIHandlerStruct {
 	return &APIHandlerStruct{
+		APIConfig: apiConfig,
 		DBQueries: dbQueries,
 	}
 }
@@ -83,16 +97,16 @@ func (a *APIHandlerStruct) CreateUser(w http.ResponseWriter, r *http.Request) {
 func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	var user User
+	var loginParams LoginParams
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&user)
+	err := decoder.Decode(&loginParams)
 	if err != nil {
 		log.Println("failed to decode data", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	retrievedUser, err := a.DBQueries.GetUser(r.Context(), user.Email)
+	retrievedUser, err := a.DBQueries.GetUser(r.Context(), loginParams.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			w.WriteHeader(http.StatusNotFound)
@@ -104,9 +118,9 @@ func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authenticated, err := auth.CheckPassword(user.Password, retrievedUser.HashedPassword)
+	authenticated, err := auth.CheckPassword(loginParams.Password, retrievedUser.HashedPassword)
 	if err != nil {
-		log.Println("failed to check password", user.Password, err)
+		log.Println("failed to check password", loginParams.Password, err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -117,15 +131,47 @@ func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	retrievedUser.HashedPassword = ""
-	utils.RespondJSON(w, http.StatusOK, retrievedUser)
+
+	// Create JWT
+	// if expiration is specified, use it
+	// if expiration is not specified, use default expiration of 3600s (1hr)
+	// if expiration is over 1hr, use 1hr
+	expirationInSeconds := 3600
+	if loginParams.ExpiresInSeconds != 0 && loginParams.ExpiresInSeconds <= 3600 {
+		expirationInSeconds = loginParams.ExpiresInSeconds
+	}
+
+	log.Println("Expiration: ", expirationInSeconds, loginParams.ExpiresInSeconds)
+
+	jwtToken, err := auth.MakeJWT(retrievedUser.ID, a.APIConfig.JWTSecret, time.Second*time.Duration(expirationInSeconds))
+	if err != nil {
+		log.Println("failed to create JWT", err)
+		utils.RespondError(w, http.StatusInternalServerError, "failed to create JWT")
+	}
+
+	utils.RespondJSON(w, http.StatusOK, &LoginResponse{User: retrievedUser, Token: jwtToken})
 }
 
 func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Println("failed to get token")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	userUUID, err := auth.ValidateJWT(token, a.APIConfig.JWTSecret)
+	if err != nil {
+		log.Println("failed to validate JWT")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
 	var chirpStr Chirp
 	decode := json.NewDecoder(r.Body)
-	err := decode.Decode(&chirpStr)
+	err = decode.Decode(&chirpStr)
 	if err != nil {
 		log.Printf("failed to decode data: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -141,8 +187,9 @@ func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 
 	params := database.CreateChirpParams{
 		Body:   chirpStr.Body,
-		UserID: uuid.MustParse(chirpStr.UserID),
+		UserID: userUUID,
 	}
+
 	chirp, err := a.DBQueries.CreateChirp(r.Context(), params)
 	if err != nil {
 		log.Printf("failed to create chrip: %v", err)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"chirpy/handlers"
+	"chirpy/internal/config"
 	"chirpy/internal/database"
 	"chirpy/metrics"
 	"chirpy/middlewares"
@@ -20,6 +21,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// API Config
+	apiConfig := &config.APIConfig{
+		JWTSecret: os.Getenv("JWT_SECRET"),
+	}
+
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -32,7 +38,7 @@ func main() {
 	mux := http.ServeMux{}
 
 	apiMiddlewares := middlewares.NewMiddlwares(apiMetrics)
-	apiHandlers := handlers.NewAPIHandler(dbQueries)
+	apiHandlers := handlers.NewAPIHandler(apiConfig, dbQueries)
 	adminHandlers := handlers.NewAdminHandlers(os.Getenv("PLATFORM"), apiMetrics, dbQueries)
 
 	mux.HandleFunc("GET /api/healthz", apiHandlers.HealthCheck)
