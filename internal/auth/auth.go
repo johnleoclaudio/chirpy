@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,7 +35,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 		return "", err
 	}
 
-	return jwtToken, err
+	return jwtToken, nil
 }
 
 func ValidateJWT(tokenString, tokenSecret string) (string, error) {
@@ -41,7 +43,7 @@ func ValidateJWT(tokenString, tokenSecret string) (string, error) {
 		return []byte(tokenSecret), nil
 	})
 	if err != nil {
-		log.Println(err)
+		log.Printf("failed to validate JWT: %v, %s", err, tokenString)
 		return "", err
 	}
 
@@ -56,9 +58,33 @@ func GetBearerToken(headers http.Header) (string, error) {
 	}
 
 	token := strings.Split(authHeader, " ")
-	if len(token) == 2 && strings.ToLower(token[0]) == "bearer" {
-		return token[1], nil
+	if len(token) != 2 || strings.ToLower(token[0]) != "bearer" {
+		return "", fmt.Errorf("malformed auth header")
 	}
 
-	return "", nil
+	return token[1], nil
+}
+
+func GetRefreshTokenHeader(headers http.Header) (string, error) {
+	refresh := headers.Get("Authorization")
+	if refresh == "" {
+		return "", fmt.Errorf("refresh header missing")
+	}
+
+	token := strings.Split(refresh, " ")
+	if len(token) != 2 || strings.ToLower(token[0]) != "bearer" {
+		return "", fmt.Errorf("malformed auth header")
+	}
+
+	return token[1], nil
+}
+
+func MakeRefreshToken() (string, error) {
+	randomBytes := make([]byte, 32)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		return "", err
+	}
+	refreshToken := hex.EncodeToString(randomBytes)
+	return refreshToken, nil
 }

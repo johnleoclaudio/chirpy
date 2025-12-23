@@ -37,7 +37,7 @@ func main() {
 
 	mux := http.ServeMux{}
 
-	apiMiddlewares := middlewares.NewMiddlwares(apiMetrics)
+	apiMiddlewares := middlewares.NewMiddlewares(apiMetrics)
 	apiHandlers := handlers.NewAPIHandler(apiConfig, dbQueries)
 	adminHandlers := handlers.NewAdminHandlers(os.Getenv("PLATFORM"), apiMetrics, dbQueries)
 
@@ -47,6 +47,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiHandlers.CreateChirp)
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 	mux.HandleFunc("POST /api/login", apiHandlers.Login)
+	mux.HandleFunc("POST /api/refresh", apiHandlers.RefreshAccessToken)
+	mux.HandleFunc("POST /api/revoke", apiHandlers.RevokeRefreshToken)
 
 	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("./app")))))
 

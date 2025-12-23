@@ -26,14 +26,14 @@ type User struct {
 }
 
 type LoginParams struct {
-	Password         string `json:"password"`
-	Email            string `json:"email"`
-	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+	Password string `json:"password"`
+	Email    string `json:"email"`
 }
 
 type LoginResponse struct {
 	database.User
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type APIHandlerStruct struct {
@@ -130,26 +130,97 @@ func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	retrievedUser.HashedPassword = ""
-
-	// Create JWT
-	// if expiration is specified, use it
-	// if expiration is not specified, use default expiration of 3600s (1hr)
-	// if expiration is over 1hr, use 1hr
-	expirationInSeconds := 3600
-	if loginParams.ExpiresInSeconds != 0 && loginParams.ExpiresInSeconds <= 3600 {
-		expirationInSeconds = loginParams.ExpiresInSeconds
+	token, err := auth.MakeRefreshToken()
+	if err != nil {
+		log.Println("failed to create refreshToken", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	log.Println("Expiration: ", expirationInSeconds, loginParams.ExpiresInSeconds)
+	refreshToken, err := a.DBQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{Token: token, UserID: retrievedUser.ID})
+	if err != nil {
+		log.Println("failed to insert refresh token", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
+	expirationInSeconds := 3600
 	jwtToken, err := auth.MakeJWT(retrievedUser.ID, a.APIConfig.JWTSecret, time.Second*time.Duration(expirationInSeconds))
 	if err != nil {
 		log.Println("failed to create JWT", err)
 		utils.RespondError(w, http.StatusInternalServerError, "failed to create JWT")
 	}
 
-	utils.RespondJSON(w, http.StatusOK, &LoginResponse{User: retrievedUser, Token: jwtToken})
+	log.Printf("created access token: %s, owner: %s", jwtToken, refreshToken.UserID)
+
+	retrievedUser.HashedPassword = ""
+
+	utils.RespondJSON(w, http.StatusOK, &LoginResponse{
+		User:         retrievedUser,
+		Token:        jwtToken,
+		RefreshToken: refreshToken.Token,
+	})
+}
+
+func (a *APIHandlerStruct) RefreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetRefreshTokenHeader(r.Header)
+	if err != nil {
+		log.Printf("failed to get refresh token header: %v", err)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	token, err := a.DBQueries.GetRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		log.Printf("failed to get refresh token from db: %v, %s", err, refreshToken)
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// check if revoked_at is not empty or
+	// if the current time and date is after the token expiration
+	if !token.RevokedAt.Time.IsZero() || time.Now().After(token.ExpiresAt) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	authToken, err := auth.MakeJWT(token.UserID, a.APIConfig.JWTSecret, time.Second*3600)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+	payload.Token = authToken
+	utils.RespondJSON(w, http.StatusOK, payload)
+}
+
+func (a *APIHandlerStruct) RevokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetRefreshTokenHeader(r.Header)
+	if err != nil {
+		log.Printf("failed to get refresh token header: %v", err)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	_, err = a.DBQueries.RevokeRefreskToken(r.Context(), refreshToken)
+	if err != nil {
+		log.Printf("failed to revoke refresh token from db: %v, %s", err, refreshToken)
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
@@ -157,14 +228,14 @@ func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
-		log.Println("failed to get token")
+		log.Printf("GetBearerToken error: %v", err)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
 	userUUID, err := auth.ValidateJWT(token, a.APIConfig.JWTSecret)
 	if err != nil {
-		log.Println("failed to validate JWT")
+		log.Printf("failed to validate JWT: %v", err)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -185,9 +256,16 @@ func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, err := uuid.Parse(userUUID)
+	if err != nil {
+		log.Printf("failed to parse user UUID: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
 	params := database.CreateChirpParams{
 		Body:   chirpStr.Body,
-		UserID: userUUID,
+		UserID: userID,
 	}
 
 	chirp, err := a.DBQueries.CreateChirp(r.Context(), params)
