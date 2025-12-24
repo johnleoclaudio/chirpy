@@ -9,7 +9,7 @@ type Middlewares struct {
 	APIMetrics *metrics.API
 }
 
-func NewMiddlwares(apiMetrics *metrics.API) *Middlewares {
+func NewMiddlewares(apiMetrics *metrics.API) *Middlewares {
 	return &Middlewares{
 		APIMetrics: apiMetrics,
 	}
