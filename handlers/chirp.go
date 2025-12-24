@@ -75,14 +75,23 @@ func (a *APIHandlerStruct) ListChirps(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	authorID := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "asc"
+	}
 
 	if authorID != "" {
 		userID, parseErr := uuid.Parse(authorID)
 		if parseErr == nil {
-			chirps, err = a.DBQueries.ListChirpsByAuthorID(r.Context(), userID)
+			chirps, err = a.DBQueries.ListChirpsByAuthorID(r.Context(), database.ListChirpsByAuthorIDParams{UserID: userID, SortOrder: sortOrder})
 		}
 	} else {
-		chirps, err = a.DBQueries.ListChirps(r.Context())
+		chirps, err = a.DBQueries.ListChirps(r.Context(), sortOrder)
 	}
 
 	if err != nil {

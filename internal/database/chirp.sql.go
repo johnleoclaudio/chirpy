@@ -71,11 +71,13 @@ func (q *Queries) GetChirp(ctx context.Context, id uuid.UUID) (Chirp, error) {
 
 const listChirps = `-- name: ListChirps :many
 SELECT id, created_at, updated_at, body, user_id FROM chirps
-ORDER BY created_at ASC
+ORDER BY 
+  CASE WHEN $1 = 'desc' THEN created_at END DESC,
+  CASE WHEN $1 = 'asc' THEN created_at END ASC
 `
 
-func (q *Queries) ListChirps(ctx context.Context) ([]Chirp, error) {
-	rows, err := q.db.QueryContext(ctx, listChirps)
+func (q *Queries) ListChirps(ctx context.Context, sortOrder interface{}) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, listChirps, sortOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -106,11 +108,18 @@ func (q *Queries) ListChirps(ctx context.Context) ([]Chirp, error) {
 const listChirpsByAuthorID = `-- name: ListChirpsByAuthorID :many
 SELECT id, created_at, updated_at, body, user_id FROM chirps
 WHERE user_id = $1
-ORDER BY created_at ASC
+ORDER BY
+  CASE WHEN $2 = 'desc' THEN created_at END DESC,
+  CASE WHEN $2 = 'asc' THEN created_at END ASC
 `
 
-func (q *Queries) ListChirpsByAuthorID(ctx context.Context, userID uuid.UUID) ([]Chirp, error) {
-	rows, err := q.db.QueryContext(ctx, listChirpsByAuthorID, userID)
+type ListChirpsByAuthorIDParams struct {
+	UserID    uuid.UUID   `json:"user_id"`
+	SortOrder interface{} `json:"sort_order"`
+}
+
+func (q *Queries) ListChirpsByAuthorID(ctx context.Context, arg ListChirpsByAuthorIDParams) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, listChirpsByAuthorID, arg.UserID, arg.SortOrder)
 	if err != nil {
 		return nil, err
 	}

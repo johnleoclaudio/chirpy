@@ -7,14 +7,16 @@ RETURNING *;
 
 -- name: ListChirps :many
 SELECT * FROM chirps
-ORDER BY created_at ASC;
+ORDER BY 
+  CASE WHEN sqlc.arg('sort_order') = 'desc' THEN created_at END DESC,
+  CASE WHEN sqlc.arg('sort_order') = 'asc' THEN created_at END ASC;
 
 -- name: ListChirpsByAuthorID :many
 SELECT * FROM chirps
 WHERE user_id = $1
-ORDER BY created_at ASC;
-
-
+ORDER BY
+  CASE WHEN sqlc.arg('sort_order') = 'desc' THEN created_at END DESC,
+  CASE WHEN sqlc.arg('sort_order') = 'asc' THEN created_at END ASC;
 
 -- name: GetChirp :one
 SELECT * FROM chirps
