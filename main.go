@@ -58,6 +58,9 @@ func main() {
 	mux.HandleFunc("POST /api/users", apiHandlers.CreateUser)
 	mux.HandleFunc("PUT /api/users", apiHandlers.UpdateUser)
 
+	// webhook
+	mux.HandleFunc("POST /api/polka/webhooks", apiHandlers.Webhook)
+
 	mux.Handle("/app/", apiMiddlewares.MiddlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("./app")))))
 
 	fs := http.FileServer(http.Dir("./app/assets/"))
