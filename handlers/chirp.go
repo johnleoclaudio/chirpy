@@ -71,7 +71,20 @@ func (a *APIHandlerStruct) CreateChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIHandlerStruct) ListChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := a.DBQueries.ListChirps(r.Context())
+	var chirps []database.Chirp
+	var err error
+
+	authorID := r.URL.Query().Get("author_id")
+
+	if authorID != "" {
+		userID, parseErr := uuid.Parse(authorID)
+		if parseErr == nil {
+			chirps, err = a.DBQueries.ListChirpsByAuthorID(r.Context(), userID)
+		}
+	} else {
+		chirps, err = a.DBQueries.ListChirps(r.Context())
+	}
+
 	if err != nil {
 		log.Printf("failed to list chrip: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
