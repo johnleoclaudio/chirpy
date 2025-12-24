@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"chirpy/internal/auth"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,10 +21,21 @@ type WebhookEvent struct {
 func (a *APIHandlerStruct) Webhook(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	if apiKey != a.APIConfig.PolkaKey {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
 	var webhookEvent WebhookEvent
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&webhookEvent)
+	err = decoder.Decode(&webhookEvent)
 	if err != nil {
 		log.Println("failed to decode webhook event")
 		w.WriteHeader(http.StatusInternalServerError)
