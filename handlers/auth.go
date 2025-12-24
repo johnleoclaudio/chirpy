@@ -80,8 +80,6 @@ func (a *APIHandlerStruct) Login(w http.ResponseWriter, r *http.Request) {
 		utils.RespondError(w, http.StatusInternalServerError, "failed to create JWT")
 	}
 
-	log.Printf("created access token: %s, owner: %s", jwtToken, refreshToken.UserID)
-
 	retrievedUser.HashedPassword = ""
 
 	utils.RespondJSON(w, http.StatusOK, &LoginResponse{
